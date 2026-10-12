@@ -1,11 +1,21 @@
 #include <chrono>
 #include <cmath>
+#include <concepts>
 
 #include <gtest/gtest.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include "stvl_map/stvl_map.hpp"
+
+template <typename T>
+concept HasGlobalOccupancyApi = requires(
+    const T& map, const finenav::common::Position3D& position) {
+    { map.isOccupiedGlobal(position) } -> std::same_as<bool>;
+    map.globalMap();
+};
+
+static_assert(!HasGlobalOccupancyApi<stvl_map::StvlMap>);
 
 namespace {
 
