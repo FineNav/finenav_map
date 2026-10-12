@@ -1,0 +1,54 @@
+# Parameters for the persistent FineNav global occupancy map plugin.
+# Clouds must already be expressed in input_frame or map_frame. No sensor
+# extrinsic is configured here.
+global_occupancy_map:
+  cloud_topic:
+    type: string
+    default_value: /points
+    read_only: true
+    description: PointCloud2 topic consumed by the map.
+  input_frame:
+    type: string
+    default_value: base_link
+    read_only: true
+    description: Robot body frame transformed with RobotState.pose.
+  map_frame:
+    type: string
+    default_value: map
+    read_only: true
+    description: World frame in which occupied endpoints are stored.
+  resolution:
+    type: double
+    default_value: 0.2
+    read_only: true
+    description: Octree leaf resolution in metres.
+    validation:
+      gt<>: [0.0]
+  max_buffer_size:
+    type: int
+    default_value: 32
+    read_only: true
+    description: Maximum number of buffered point-cloud messages.
+    validation:
+      gt_eq<>: [0]
+  observation_keep_time_sec:
+    type: double
+    default_value: 1.0
+    read_only: true
+    description: Maximum age of a buffered observation, zero disables eviction.
+    validation:
+      gt_eq<>: [0.0]
+  source_timeout_sec:
+    type: double
+    default_value: 0.0
+    read_only: true
+    description: Source timeout warning threshold, zero disables it.
+    validation:
+      gt_eq<>: [0.0]
+  expected_update_rate_hz:
+    type: double
+    default_value: 0.0
+    read_only: true
+    description: Expected cloud rate for starvation warnings, zero disables them.
+    validation:
+      gt_eq<>: [0.0]
