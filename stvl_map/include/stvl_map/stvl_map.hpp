@@ -10,10 +10,13 @@
 
 #include "finenav_core/plugin_map.hpp"
 #include "stvl_map/stvl_map_params.hpp"
-#include "stvl_map/grid_map.hpp"
+#include "grid_map/grid_map.hpp"
 #include "stvl_map/voxel.hpp"
 
 namespace stvl_map {
+using grid_map::GridIndex;
+using grid_map::GridMap;
+using grid_map::GridMapConfig;
 
 // STVL-specific sparse index policy. GridMap only defines GridIndex and maps
 // logical indices to its circular backing storage; it does not own this hash.

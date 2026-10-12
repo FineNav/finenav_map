@@ -10,6 +10,7 @@
 
   <depend>eigen3_cmake_module</depend>
   <depend>finenav_core</depend>
+  <depend>grid_map</depend>
   <depend>generate_parameter_library</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
