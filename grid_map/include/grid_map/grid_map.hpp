@@ -8,7 +8,7 @@
 
 #include "finenav_common/geometry_types.hpp"
 
-namespace stvl_map {
+namespace grid_map {
 
 struct GridIndex {
     int x{0};
@@ -209,4 +209,4 @@ private:
     bool configured_{false};
 };
 
-}  // namespace stvl_map
+}  // namespace grid_map

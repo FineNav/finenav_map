@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
-#include "stvl_map/grid_map.hpp"
+#include "grid_map/grid_map.hpp"
 
 namespace {
 
 TEST(GridMap, ConvertsWorldPositionsToRoundedLogicalIndices) {
-    stvl_map::GridMap<int> grid;
-    stvl_map::GridMapConfig config;
+    grid_map::GridMap<int> grid;
+    grid_map::GridMapConfig config;
     config.length = {5.0, 5.0, 5.0};
     config.resolution = 1.0;
     config.origin = {0.0, 0.0, 0.0};
@@ -21,8 +21,8 @@ TEST(GridMap, ConvertsWorldPositionsToRoundedLogicalIndices) {
 }
 
 TEST(GridMap, ShiftRetainsOverlapAndClearsCellsLeavingWindow) {
-    stvl_map::GridMap<int> grid;
-    stvl_map::GridMapConfig config;
+    grid_map::GridMap<int> grid;
+    grid_map::GridMapConfig config;
     config.length = {5.0, 5.0, 5.0};
     config.resolution = 1.0;
     config.origin = {0.0, 0.0, 0.0};
