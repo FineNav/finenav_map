@@ -18,8 +18,7 @@ using finenav_grid_map::GridIndex;
 using finenav_grid_map::GridMap;
 using finenav_grid_map::GridMapConfig;
 
-// Temporal-voxel-specific sparse index policy. GridMap only defines GridIndex and maps
-// logical indices to its circular backing storage; it does not own this hash.
+// Hash for the sparse set of active voxel indices.
 struct ActiveIndexHash {
     std::size_t operator()(const GridIndex& index) const noexcept {
         const auto mix = [](std::size_t value) {

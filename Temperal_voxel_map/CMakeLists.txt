@@ -50,4 +50,6 @@ endif()
 ament_export_include_directories(include)
 ament_export_libraries(Temperal_voxel_map)
 ament_export_dependencies(eigen3_cmake_module finenav_core finenav_grid_map rclcpp sensor_msgs)
+install(FILES LICENSE DESTINATION share/${PROJECT_NAME})
+
 ament_package()
