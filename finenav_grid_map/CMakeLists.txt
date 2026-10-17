@@ -27,4 +27,6 @@ endif()
 
 ament_export_targets(finenav_grid_mapTargets HAS_LIBRARY_TARGET)
 ament_export_dependencies(finenav_common)
+install(FILES LICENSE DESTINATION share/${PROJECT_NAME})
+
 ament_package()
