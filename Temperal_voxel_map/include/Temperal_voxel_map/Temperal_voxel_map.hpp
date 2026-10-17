@@ -9,13 +9,16 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include "finenav_core/plugin_map.hpp"
-#include "stvl_map/stvl_map_params.hpp"
-#include "stvl_map/grid_map.hpp"
-#include "stvl_map/voxel.hpp"
+#include "Temperal_voxel_map/Temperal_voxel_map_params.hpp"
+#include "finenav_grid_map/grid_map.hpp"
+#include "Temperal_voxel_map/voxel.hpp"
 
-namespace stvl_map {
+namespace Temperal_voxel_map {
+using finenav_grid_map::GridIndex;
+using finenav_grid_map::GridMap;
+using finenav_grid_map::GridMapConfig;
 
-// STVL-specific sparse index policy. GridMap only defines GridIndex and maps
+// Temporal-voxel-specific sparse index policy. GridMap only defines GridIndex and maps
 // logical indices to its circular backing storage; it does not own this hash.
 struct ActiveIndexHash {
     std::size_t operator()(const GridIndex& index) const noexcept {
@@ -33,13 +36,13 @@ struct ActiveIndexHash {
     }
 };
 
-class StvlMap {
+class TemperalVoxelMap {
 public:
     using ConfigType = Params;
     using DataType = Voxel;
     using Clock = Voxel::Clock;
 
-    StvlMap() = default;
+    TemperalVoxelMap() = default;
 
     void configure(const ConfigType& config);
     void selfManage(finenav::core::MapRuntime& runtime);
@@ -79,8 +82,8 @@ private:
     double resolution_{0.2};
     double decay_time_sec_{5.0};
     finenav::core::ObservationBufferPolicy observation_policy_{};
-    rclcpp::Logger logger_{rclcpp::get_logger("StvlMap")};
+    rclcpp::Logger logger_{rclcpp::get_logger("TemperalVoxelMap")};
     bool configured_{false};
 };
 
-}  // namespace stvl_map
+}  // namespace Temperal_voxel_map

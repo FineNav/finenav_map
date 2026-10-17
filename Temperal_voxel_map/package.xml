@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>stvl_map</name>
+  <name>Temperal_voxel_map</name>
   <version>0.1.0</version>
   <description>FineNav spatio-temporal rolling voxel map plugin.</description>
   <maintainer email="wangjinghui@sjtu.edu.cn">Jinghui Wang</maintainer>
@@ -10,6 +10,7 @@
 
   <depend>eigen3_cmake_module</depend>
   <depend>finenav_core</depend>
+  <depend>finenav_grid_map</depend>
   <depend>generate_parameter_library</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>

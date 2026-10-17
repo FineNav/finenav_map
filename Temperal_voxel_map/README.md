@@ -1,6 +1,6 @@
-# stvl_map
+# Temperal_voxel_map
 
-`stvl_map` is a FineNav `Map` plugin for a rolling spatio-temporal voxel
+`Temperal_voxel_map` is a FineNav `Map` plugin for a rolling spatio-temporal voxel
 window. It buffers `sensor_msgs/msg/PointCloud2` observations through
 `MapRuntime`, transforms clouds from `base_link` with the timestamped
 `RobotState.pose`, and removes occupied voxels after `decay_time_sec` without a
@@ -17,16 +17,16 @@ Build it alongside the FineNav workspace:
 
 ```bash
 colcon build --base-paths /home/fins/Desktop/FineNav/FineNav-Engine \
-  /home/fins/Desktop/stvl_map --packages-select stvl_map
+  /home/fins/Desktop/Temperal_voxel_map --packages-select Temperal_voxel_map
 ```
 
 Load the installed plugin before creating a map server:
 
 ```cpp
-engine->loadAlgoPlugins({"stvl_map/lib"});
-engine->createMapServer("stvl_map", "stvl_map_server");
+engine->loadAlgoPlugins({"Temperal_voxel_map/lib"});
+engine->createMapServer("Temperal_voxel_map", "Temperal_voxel_map_server");
 ```
 
-The generated parameter namespace is `stvl_map`; see
-`config/stvl_map.yaml`. Window size and subscription/frame settings are
+The generated parameter namespace is `Temperal_voxel_map`; see
+`config/Temperal_voxel_map.yaml`. Window size and subscription/frame settings are
 read-only after startup. `decay_time_sec` can be changed at runtime.

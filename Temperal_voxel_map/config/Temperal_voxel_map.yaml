@@ -1,7 +1,7 @@
-# Parameters for the FineNav STVL map plugin.
+# Parameters for the FineNav temporal voxel map plugin.
 # Clouds must already be expressed in input_frame or map_frame.  No sensor
 # extrinsic is configured here.
-stvl_map:
+Temperal_voxel_map:
   cloud_topic:
     type: string
     default_value: /points

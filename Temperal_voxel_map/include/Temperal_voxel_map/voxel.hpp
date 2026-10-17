@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace stvl_map {
+namespace Temperal_voxel_map {
 
 struct Voxel {
     using Clock = std::chrono::steady_clock;
@@ -12,4 +12,4 @@ struct Voxel {
     Clock::time_point last_update{};
 };
 
-}  // namespace stvl_map
+}  // namespace Temperal_voxel_map

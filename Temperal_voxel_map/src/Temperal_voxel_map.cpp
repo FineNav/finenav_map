@@ -1,4 +1,4 @@
-#include "stvl_map/stvl_map.hpp"
+#include "Temperal_voxel_map/Temperal_voxel_map.hpp"
 
 #include <cmath>
 #include <limits>
@@ -6,9 +6,9 @@
 #include <Eigen/Geometry>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
-namespace stvl_map {
+namespace Temperal_voxel_map {
 
-void StvlMap::configure(const ConfigType& config) {
+void TemperalVoxelMap::configure(const ConfigType& config) {
     const bool shape_changed = !configured_ || map_length_ != config.map_length ||
                                resolution_ != config.resolution;
 
@@ -34,13 +34,13 @@ void StvlMap::configure(const ConfigType& config) {
     configured_ = true;
 
     RCLCPP_INFO(logger_,
-                "StvlMap configured: topic='%s', frames='%s'/'%s', length=%.2f m, "
+                "TemperalVoxelMap configured: topic='%s', frames='%s'/'%s', length=%.2f m, "
                 "resolution=%.3f m, decay=%.2f s",
                 cloud_topic_.c_str(), input_frame_.c_str(), map_frame_.c_str(),
                 map_length_, resolution_, decay_time_sec_);
 }
 
-void StvlMap::selfManage(finenav::core::MapRuntime& runtime) {
+void TemperalVoxelMap::selfManage(finenav::core::MapRuntime& runtime) {
     runtime.addObservationSource<sensor_msgs::msg::PointCloud2>(
         "point_cloud", cloud_topic_, rclcpp::SensorDataQoS(), observation_policy_,
         [this](const sensor_msgs::msg::PointCloud2& cloud,
@@ -53,11 +53,11 @@ void StvlMap::selfManage(finenav::core::MapRuntime& runtime) {
     });
 }
 
-void StvlMap::insertPointCloud(const sensor_msgs::msg::PointCloud2& cloud,
+void TemperalVoxelMap::insertPointCloud(const sensor_msgs::msg::PointCloud2& cloud,
                                const finenav::core::RobotState& state,
                                Clock::time_point now) {
     if (!configured_) {
-        RCLCPP_WARN(logger_, "StvlMap received a point cloud before configure(); dropping it.");
+        RCLCPP_WARN(logger_, "TemperalVoxelMap received a point cloud before configure(); dropping it.");
         return;
     }
 
@@ -66,7 +66,7 @@ void StvlMap::insertPointCloud(const sensor_msgs::msg::PointCloud2& cloud,
     if (!in_map_frame && !in_input_frame) {
         RCLCPP_WARN(
             logger_,
-            "StvlMap: dropping cloud in unexpected frame '%s' (expected '%s' or '%s').",
+            "TemperalVoxelMap: dropping cloud in unexpected frame '%s' (expected '%s' or '%s').",
             cloud.header.frame_id.c_str(), input_frame_.c_str(), map_frame_.c_str());
         return;
     }
@@ -98,11 +98,11 @@ void StvlMap::insertPointCloud(const sensor_msgs::msg::PointCloud2& cloud,
             insertPoint({point.x(), point.y(), point.z()}, now);
         }
     } catch (const std::exception& error) {
-        RCLCPP_WARN(logger_, "StvlMap: dropping malformed PointCloud2: %s", error.what());
+        RCLCPP_WARN(logger_, "TemperalVoxelMap: dropping malformed PointCloud2: %s", error.what());
     }
 }
 
-void StvlMap::insertPoint(const finenav::common::Position3D& position,
+void TemperalVoxelMap::insertPoint(const finenav::common::Position3D& position,
                           Clock::time_point now) {
     if (!grid_.isInside(position)) {
         return;
@@ -115,7 +115,7 @@ void StvlMap::insertPoint(const finenav::common::Position3D& position,
     active_cells_.insert(index);
 }
 
-void StvlMap::pruneExpiredCells(Clock::time_point now) {
+void TemperalVoxelMap::pruneExpiredCells(Clock::time_point now) {
     if (!configured_ || decay_time_sec_ <= 0.0) {
         return;
     }
@@ -138,7 +138,7 @@ void StvlMap::pruneExpiredCells(Clock::time_point now) {
     }
 }
 
-void StvlMap::shiftWindowTo(const finenav::common::Position3D& position) {
+void TemperalVoxelMap::shiftWindowTo(const finenav::common::Position3D& position) {
     const auto old_center = grid_.getWindowCenter();
     const auto resolution = grid_.getResolution();
     const GridIndex shift{
@@ -163,11 +163,11 @@ void StvlMap::shiftWindowTo(const finenav::common::Position3D& position) {
     active_cells_ = std::move(shifted_cells);
 }
 
-bool StvlMap::isOccupied(const finenav::common::Position3D& position) const {
+bool TemperalVoxelMap::isOccupied(const finenav::common::Position3D& position) const {
     if (!grid_.isInside(position)) {
         return false;
     }
     return grid_.at(grid_.getIndex(position)).occupied;
 }
 
-}  // namespace stvl_map
+}  // namespace Temperal_voxel_map

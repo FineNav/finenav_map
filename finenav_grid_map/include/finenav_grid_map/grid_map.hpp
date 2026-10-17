@@ -3,12 +3,13 @@
 #include <cmath>
 #include <cstddef>
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
 #include "finenav_common/geometry_types.hpp"
 
-namespace stvl_map {
+namespace finenav_grid_map {
 
 struct GridIndex {
     int x{0};
@@ -51,22 +52,28 @@ public:
     GridMap() = default;
 
     void configure(const GridMapConfig& config) {
+        if (!isFinite(config.length) || !std::isfinite(config.resolution) ||
+            !isFinite(config.origin)) {
+            throw std::invalid_argument("GridMap configuration values must be finite");
+        }
         if (config.resolution <= 0.0 || config.length.x <= 0.0 ||
             config.length.y <= 0.0 || config.length.z <= 0.0) {
             throw std::invalid_argument("GridMap length and resolution must be positive");
         }
 
+        const GridIndex new_size{
+            oddCellCount(config.length.x, config.resolution),
+            oddCellCount(config.length.y, config.resolution),
+            oddCellCount(config.length.z, config.resolution),
+        };
+        const std::size_t total_size = checkedCellCount(new_size, data_.max_size());
+        std::vector<T> new_data(total_size);
+
         resolution_ = config.resolution;
         origin_ = config.origin;
-        size_ = {
-            oddCellCount(config.length.x, resolution_),
-            oddCellCount(config.length.y, resolution_),
-            oddCellCount(config.length.z, resolution_),
-        };
-        half_size_ = {size_.x / 2, size_.y / 2, size_.z / 2};
-        data_.assign(static_cast<std::size_t>(size_.x) *
-                         static_cast<std::size_t>(size_.y) *
-                         static_cast<std::size_t>(size_.z), T{});
+        size_ = new_size;
+        half_size_ = {new_size.x / 2, new_size.y / 2, new_size.z / 2};
+        data_.swap(new_data);
         start_index_ = {0, 0, 0};
         configured_ = true;
     }
@@ -88,6 +95,9 @@ public:
     }
 
     GridIndex getIndex(const Position& position) const {
+        if (!isFinite(position)) {
+            throw std::invalid_argument("GridMap position must be finite");
+        }
         return {
             static_cast<int>(std::lround((position.x - origin_.x) / resolution_)),
             static_cast<int>(std::lround((position.y - origin_.y) / resolution_)),
@@ -109,6 +119,9 @@ public:
     }
 
     bool isInside(const Position& position) const noexcept {
+        if (!isFinite(position)) {
+            return false;
+        }
         return isInside(getIndex(position));
     }
 
@@ -131,6 +144,9 @@ public:
      */
     bool shiftWindowTo(const Position& position,
                        std::vector<GridIndex>* removed = nullptr) {
+        if (!isFinite(position)) {
+            throw std::invalid_argument("GridMap position must be finite");
+        }
         if (!configured_) {
             return false;
         }
@@ -173,10 +189,39 @@ public:
     }
 
 private:
+    static bool isFinite(const Position& position) noexcept {
+        return std::isfinite(position.x) && std::isfinite(position.y) &&
+               std::isfinite(position.z);
+    }
+
     static int oddCellCount(double length, double resolution) {
-        int count = static_cast<int>(std::ceil(length / resolution));
-        count = std::max(count, 1);
-        return (count % 2 == 0) ? count + 1 : count;
+        const double raw_count = std::ceil(length / resolution);
+        if (!std::isfinite(raw_count) ||
+            raw_count > static_cast<double>(std::numeric_limits<int>::max())) {
+            throw std::length_error("GridMap axis exceeds GridIndex capacity");
+        }
+
+        int count = static_cast<int>(raw_count);
+        if (count % 2 == 0) {
+            if (count == std::numeric_limits<int>::max()) {
+                throw std::length_error("GridMap odd axis size exceeds GridIndex capacity");
+            }
+            ++count;
+        }
+        return count;
+    }
+
+    static std::size_t checkedCellCount(const GridIndex& size,
+                                        std::size_t max_size) {
+        std::size_t total = 1;
+        for (const int dimension : {size.x, size.y, size.z}) {
+            const auto extent = static_cast<std::size_t>(dimension);
+            if (total > max_size / extent) {
+                throw std::length_error("GridMap cell count exceeds storage capacity");
+            }
+            total *= extent;
+        }
+        return total;
     }
 
     static int wrap(int value, int size) noexcept {
@@ -209,4 +254,4 @@ private:
     bool configured_{false};
 };
 
-}  // namespace stvl_map
+}  // namespace finenav_grid_map
