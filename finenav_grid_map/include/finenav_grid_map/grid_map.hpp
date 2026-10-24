@@ -141,6 +141,9 @@ public:
      * @param position requested new world origin
      * @param removed optional logical indices cleared while leaving the window
      * @return true when at least one voxel shift was applied
+     *
+     * Clears only the cells in "old window \ new window" and keeps the
+     * overlap; cells that leave the window are reset to T{}.
      */
     bool shiftWindowTo(const Position& position,
                        std::vector<GridIndex>* removed = nullptr) {
@@ -163,22 +166,16 @@ public:
             return false;
         }
 
-        // For an old logical index i, the same world cell has new index i-shift.
-        // Clearing the non-overlap before advancing start_index preserves every
-        // retained cell while making newly entered logical cells default-valued.
-        for (int x = -half_size_.x; x <= half_size_.x; ++x) {
-            for (int y = -half_size_.y; y <= half_size_.y; ++y) {
-                for (int z = -half_size_.z; z <= half_size_.z; ++z) {
-                    const GridIndex old_index{x, y, z};
-                    const GridIndex new_index = old_index - shift;
-                    if (!isInside(new_index)) {
-                        if (removed != nullptr) {
-                            removed->push_back(old_index);
-                        }
-                        at(old_index) = T{};
-                    }
-                }
+        // Old index `old` maps to new index `old - shift`; the new window in
+        // old coordinates is [-half + shift, half + shift].
+        std::vector<GridIndex> leaving;
+        getDifferenceSet(shift, leaving);
+
+        for (const GridIndex& old_index : leaving) {
+            if (removed != nullptr) {
+                removed->push_back(old_index);
             }
+            at(old_index) = T{};
         }
 
         origin_.x += static_cast<double>(shift.x) * resolution_;
@@ -186,6 +183,39 @@ public:
         origin_.z += static_cast<double>(shift.z) * resolution_;
         start_index_ = wrap(start_index_ + shift, size_);
         return true;
+    }
+
+    /**
+     * @brief Copy the z column at logical (x, y) into `result`.
+     * @param x logical x index
+     * @param y logical y index
+     * @param result output buffer, cleared and filled with size_.z values
+     * @throw std::out_of_range when (x, y) is outside the window
+     */
+    void getVoxelsAlongZ(const int& x, const int& y, std::vector<T>& result) const {
+        if (!configured_ || x < -half_size_.x || x > half_size_.x ||
+            y < -half_size_.y || y > half_size_.y) {
+            throw std::out_of_range("GridMap (x, y) is outside the rolling window");
+        }
+
+        result.clear();
+        if (result.capacity() < static_cast<std::size_t>(size_.z)) {
+            result.reserve(static_cast<std::size_t>(size_.z));
+        }
+
+        // x/y are constant along the column: resolve their offsets once.
+        const int wrapped_x = wrap(x + half_size_.x + start_index_.x, size_.x);
+        const int wrapped_y = wrap(y + half_size_.y + start_index_.y, size_.y);
+        // Use std::size_t to avoid int overflow for large windows.
+        const std::size_t base_offset =
+            static_cast<std::size_t>(wrapped_y) * static_cast<std::size_t>(size_.z) +
+            static_cast<std::size_t>(wrapped_x) * static_cast<std::size_t>(size_.y) *
+                static_cast<std::size_t>(size_.z);
+
+        for (int z = -half_size_.z; z <= half_size_.z; ++z) {
+            const int wrapped_z = wrap(z + half_size_.z + start_index_.z, size_.z);
+            result.push_back(data_[base_offset + static_cast<std::size_t>(wrapped_z)]);
+        }
     }
 
 private:
@@ -243,6 +273,92 @@ private:
                static_cast<std::size_t>(wrapped.y) * static_cast<std::size_t>(size_.z) +
                static_cast<std::size_t>(wrapped.x) * static_cast<std::size_t>(size_.y) *
                    static_cast<std::size_t>(size_.z);
+    }
+
+    /**
+     * @brief Compute "old window \ new window" in old logical indices.
+     *
+     * A = [-half, half], B = [-half + shift, half + shift]. Enumerates A \ B
+     * by z -> x -> y layers; returns all of A when B lies outside A.
+     */
+    void getDifferenceSet(const GridIndex& shift, std::vector<GridIndex>& difference) const {
+        difference.clear();
+
+        const GridIndex a_min = -half_size_;
+        const GridIndex a_max = half_size_;
+        const GridIndex b_min = -half_size_ + shift;
+        const GridIndex b_max = half_size_ + shift;
+
+        auto add_range = [&](int x_start, int x_end, int y_start, int y_end,
+                             int z_start, int z_end) {
+            x_start = std::max(x_start, a_min.x);
+            x_end = std::min(x_end, a_max.x);
+            y_start = std::max(y_start, a_min.y);
+            y_end = std::min(y_end, a_max.y);
+            z_start = std::max(z_start, a_min.z);
+            z_end = std::min(z_end, a_max.z);
+
+            if (x_start > x_end || y_start > y_end || z_start > z_end) {
+                return;
+            }
+            for (int x = x_start; x <= x_end; ++x) {
+                for (int y = y_start; y <= y_end; ++y) {
+                    for (int z = z_start; z <= z_end; ++z) {
+                        difference.push_back(GridIndex{x, y, z});
+                    }
+                }
+            }
+        };
+
+        // B lies entirely outside A.
+        if (b_min.x > a_max.x || b_max.x < a_min.x ||
+            b_min.y > a_max.y || b_max.y < a_min.y ||
+            b_min.z > a_max.z || b_max.z < a_min.z) {
+            add_range(a_min.x, a_max.x, a_min.y, a_max.y, a_min.z, a_max.z);
+            return;
+        }
+
+        if (a_min.z <= b_max.z && b_max.z <= a_max.z) {
+            add_range(a_min.x, a_max.x, a_min.y, a_max.y, b_max.z + 1, a_max.z);
+
+            if (a_min.x <= b_min.x && b_min.x <= a_max.x) {
+                add_range(a_min.x, b_min.x - 1, a_min.y, a_max.y, a_min.z, b_max.z);
+
+                if (a_min.y <= b_min.y && b_min.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, a_min.y, b_min.y - 1, a_min.z, b_max.z);
+                } else if (a_min.y <= b_max.y && b_max.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, b_max.y + 1, a_max.y, a_min.z, b_max.z);
+                }
+            } else if (a_min.x <= b_max.x && b_max.x <= a_max.x) {
+                add_range(b_max.x + 1, a_max.x, a_min.y, a_max.y, a_min.z, b_max.z);
+
+                if (a_min.y <= b_min.y && b_min.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, a_min.y, b_min.y - 1, a_min.z, b_max.z);
+                } else if (a_min.y <= b_max.y && b_max.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, b_max.y + 1, a_max.y, a_min.z, b_max.z);
+                }
+            }
+        } else if (a_min.z <= b_min.z && b_min.z <= a_max.z) {
+            add_range(a_min.x, a_max.x, a_min.y, a_max.y, a_min.z, b_min.z - 1);
+
+            if (a_min.x <= b_min.x && b_min.x <= a_max.x) {
+                add_range(a_min.x, b_min.x - 1, a_min.y, a_max.y, b_min.z, a_max.z);
+
+                if (a_min.y <= b_min.y && b_min.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, a_min.y, b_min.y - 1, b_min.z, a_max.z);
+                } else if (a_min.y <= b_max.y && b_max.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, b_max.y + 1, a_max.y, b_min.z, a_max.z);
+                }
+            } else if (a_min.x <= b_max.x && b_max.x <= a_max.x) {
+                add_range(b_max.x + 1, a_max.x, a_min.y, a_max.y, b_min.z, a_max.z);
+
+                if (a_min.y <= b_min.y && b_min.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, a_min.y, b_min.y - 1, b_min.z, a_max.z);
+                } else if (a_min.y <= b_max.y && b_max.y <= a_max.y) {
+                    add_range(b_min.x, b_max.x, b_max.y + 1, a_max.y, b_min.z, a_max.z);
+                }
+            }
+        }
     }
 
     std::vector<T> data_;
