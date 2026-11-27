@@ -64,3 +64,22 @@ plugin's ROS 2 parameter file when using the voxel map.
 ## License
 
 This package is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE).
+
+## Moving-window differences
+
+`differenceRegions(size, shift)` returns `A - (A + shift)` as at most three
+non-overlapping `GridIndexRegion` boxes with inclusive logical bounds. The
+positive odd dimensions must be the configured grid size. Each box provides
+`forEachIndex(callback)`. Zero displacement produces no boxes; a displacement
+of at least one window dimension produces the whole box.
+
+`shiftWindowToWithCallback(position, outgoing, &incoming)` invokes
+`outgoing(old_index, const old_value&)` immediately before clearing each leaving
+cell. The callback must not mutate or reconfigure the grid. `incoming` receives
+boxes in the new window's logical coordinates. Center rounding and difference
+calculation use the same displacement. Even jumps beyond integer index capacity
+are handled without converting an unbounded displacement to `int`.
+
+Moving processes only the difference, in O(changed cells) time; updating the
+circular offset itself takes O(1). Overlap retains both values and storage
+addresses. Existing `shiftWindowTo(position, removed)` remains available.

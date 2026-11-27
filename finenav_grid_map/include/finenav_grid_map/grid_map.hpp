@@ -3,8 +3,11 @@
 #include <cmath>
 #include <cstddef>
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "finenav_common/geometry_types.hpp"
@@ -33,6 +36,74 @@ struct GridMapConfig {
     double resolution{0.1};
     finenav::common::Position3D origin{0.0, 0.0, 0.0};
 };
+
+// Inclusive logical-cell bounds. A translated box difference has at most
+// three disjoint slabs; no intermediate per-cell index vector is needed.
+struct GridIndexRegion {
+    GridIndex min;
+    GridIndex max;
+
+    template<class Fn>
+    void forEachIndex(Fn&& fn) const {
+        for (int x = min.x; x <= max.x; ++x)
+            for (int y = min.y; y <= max.y; ++y)
+                for (int z = min.z; z <= max.z; ++z)
+                    fn(GridIndex{x, y, z});
+    }
+};
+
+struct GridDifferenceRegions {
+    std::array<GridIndexRegion, 3> regions{};
+    std::size_t count = 0;
+    const GridIndexRegion* begin() const { return regions.data(); }
+    const GridIndexRegion* end() const { return regions.data() + count; }
+};
+
+// A - (A + shift), expressed in A's logical coordinates. size must be positive
+// and odd. Check non-overlap before arithmetic, including INT_MIN/MAX jumps.
+inline GridDifferenceRegions differenceRegions(GridIndex size, GridIndex shift) {
+    const GridIndex lo{-size.x / 2, -size.y / 2, -size.z / 2};
+    const GridIndex hi{size.x / 2, size.y / 2, size.z / 2};
+    GridDifferenceRegions result;
+    if (static_cast<int64_t>(shift.x) >= size.x ||
+        static_cast<int64_t>(shift.x) <= -static_cast<int64_t>(size.x) ||
+        static_cast<int64_t>(shift.y) >= size.y ||
+        static_cast<int64_t>(shift.y) <= -static_cast<int64_t>(size.y) ||
+        static_cast<int64_t>(shift.z) >= size.z ||
+        static_cast<int64_t>(shift.z) <= -static_cast<int64_t>(size.z)) {
+        result.regions[result.count++] = {lo, hi};
+        return result;
+    }
+    GridIndex remaining_lo = lo;
+    GridIndex remaining_hi = hi;
+    const auto axis = [&](int delta, int& lower, int& upper) {
+        if (delta > 0) lower += delta;
+        else upper += delta;
+    };
+    // Restrict subsequent slabs to the overlap on previously handled axes.
+    if (shift.x > 0) {
+        result.regions[result.count++] = {lo, {lo.x + shift.x - 1, hi.y, hi.z}};
+    } else if (shift.x < 0) {
+        result.regions[result.count++] = {{hi.x + shift.x + 1, lo.y, lo.z}, hi};
+    }
+    axis(shift.x, remaining_lo.x, remaining_hi.x);
+    if (shift.y > 0) {
+        result.regions[result.count++] = {remaining_lo,
+            {remaining_hi.x, lo.y + shift.y - 1, hi.z}};
+    } else if (shift.y < 0) {
+        result.regions[result.count++] = {{remaining_lo.x, hi.y + shift.y + 1, lo.z},
+            remaining_hi};
+    }
+    axis(shift.y, remaining_lo.y, remaining_hi.y);
+    if (shift.z > 0) {
+        result.regions[result.count++] = {remaining_lo,
+            {remaining_hi.x, remaining_hi.y, lo.z + shift.z - 1}};
+    } else if (shift.z < 0) {
+        result.regions[result.count++] = {{remaining_lo.x, remaining_lo.y, hi.z + shift.z + 1},
+            remaining_hi};
+    }
+    return result;
+}
 
 /**
  * @brief Fixed-resolution rolling grid backed by a circular vector.
@@ -114,8 +185,9 @@ public:
     }
 
     bool isInside(const GridIndex& index) const noexcept {
-        return configured_ && std::abs(index.x) <= half_size_.x &&
-               std::abs(index.y) <= half_size_.y && std::abs(index.z) <= half_size_.z;
+        return configured_ && index.x >= -half_size_.x && index.x <= half_size_.x &&
+               index.y >= -half_size_.y && index.y <= half_size_.y &&
+               index.z >= -half_size_.z && index.z <= half_size_.z;
     }
 
     bool isInside(const Position& position) const noexcept {
@@ -144,47 +216,53 @@ public:
      */
     bool shiftWindowTo(const Position& position,
                        std::vector<GridIndex>* removed = nullptr) {
+        if (removed != nullptr) removed->clear();
+        return shiftWindowToWithCallback(position,
+            [removed](const GridIndex& index, const T&) {
+                if (removed != nullptr) removed->push_back(index);
+            });
+    }
+
+    // Invoke outgoing(index, old_value) immediately before clearing each
+    // leaving cell. The callback must not mutate/reconfigure this grid.
+    // incoming receives disjoint bounds in the NEW logical coordinate frame.
+    template<class Fn>
+    bool shiftWindowToWithCallback(const Position& position, Fn&& outgoing,
+                                  GridDifferenceRegions* incoming = nullptr) {
+        if (incoming != nullptr) *incoming = {};
         if (!isFinite(position)) {
             throw std::invalid_argument("GridMap position must be finite");
         }
         if (!configured_) {
             return false;
         }
-        if (removed != nullptr) {
-            removed->clear();
-        }
-
+        const Position rounded{
+            std::round((position.x - origin_.x) / resolution_),
+            std::round((position.y - origin_.y) / resolution_),
+            std::round((position.z - origin_.z) / resolution_)};
+        if (!isFinite(rounded) ||
+            (rounded.x == 0 && rounded.y == 0 && rounded.z == 0)) return false;
+        const Position new_origin{origin_.x + rounded.x * resolution_,
+                                  origin_.y + rounded.y * resolution_,
+                                  origin_.z + rounded.z * resolution_};
+        if (!isFinite(new_origin)) return false;
+        // Saturation is only for finding the difference, never for the center.
         const GridIndex shift{
-            static_cast<int>(std::lround((position.x - origin_.x) / resolution_)),
-            static_cast<int>(std::lround((position.y - origin_.y) / resolution_)),
-            static_cast<int>(std::lround((position.z - origin_.z) / resolution_)),
-        };
-        if (shift == GridIndex{}) {
-            return false;
+            static_cast<int>(std::clamp(rounded.x, -double(size_.x), double(size_.x))),
+            static_cast<int>(std::clamp(rounded.y, -double(size_.y), double(size_.y))),
+            static_cast<int>(std::clamp(rounded.z, -double(size_.z), double(size_.z)))};
+        for (const auto& region : differenceRegions(size_, shift)) {
+            region.forEachIndex([&](const GridIndex& index) {
+                auto& cell = at(index);
+                outgoing(index, std::as_const(cell));
+                cell = T{};
+            });
         }
-
-        // For an old logical index i, the same world cell has new index i-shift.
-        // Clearing the non-overlap before advancing start_index preserves every
-        // retained cell while making newly entered logical cells default-valued.
-        for (int x = -half_size_.x; x <= half_size_.x; ++x) {
-            for (int y = -half_size_.y; y <= half_size_.y; ++y) {
-                for (int z = -half_size_.z; z <= half_size_.z; ++z) {
-                    const GridIndex old_index{x, y, z};
-                    const GridIndex new_index = old_index - shift;
-                    if (!isInside(new_index)) {
-                        if (removed != nullptr) {
-                            removed->push_back(old_index);
-                        }
-                        at(old_index) = T{};
-                    }
-                }
-            }
-        }
-
-        origin_.x += static_cast<double>(shift.x) * resolution_;
-        origin_.y += static_cast<double>(shift.y) * resolution_;
-        origin_.z += static_cast<double>(shift.z) * resolution_;
-        start_index_ = wrap(start_index_ + shift, size_);
+        if (incoming != nullptr) *incoming = differenceRegions(size_, -shift);
+        origin_ = new_origin;
+        start_index_ = {wrap(int64_t(start_index_.x) + shift.x, size_.x),
+                        wrap(int64_t(start_index_.y) + shift.y, size_.y),
+                        wrap(int64_t(start_index_.z) + shift.z, size_.z)};
         return true;
     }
 
@@ -224,7 +302,7 @@ private:
         return total;
     }
 
-    static int wrap(int value, int size) noexcept {
+    static int wrap(int64_t value, int size) noexcept {
         const int remainder = value % size;
         return remainder < 0 ? remainder + size : remainder;
     }
@@ -237,8 +315,10 @@ private:
         if (!isInside(index)) {
             throw std::out_of_range("GridMap index is outside the rolling window");
         }
-        const GridIndex unwrapped = index + half_size_ + start_index_;
-        const GridIndex wrapped = wrap(unwrapped, size_);
+        const GridIndex wrapped{
+            wrap(int64_t(index.x) + half_size_.x + start_index_.x, size_.x),
+            wrap(int64_t(index.y) + half_size_.y + start_index_.y, size_.y),
+            wrap(int64_t(index.z) + half_size_.z + start_index_.z, size_.z)};
         return static_cast<std::size_t>(wrapped.z) +
                static_cast<std::size_t>(wrapped.y) * static_cast<std::size_t>(size_.z) +
                static_cast<std::size_t>(wrapped.x) * static_cast<std::size_t>(size_.y) *

@@ -1,3 +1,8 @@
+
+#include <map>
+#include <set>
+#include <tuple>
+#include <random>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -241,6 +246,145 @@ TEST(GridMap, RepeatedRollingDoesNotRestoreDataAfterItLeavesTheWindow) {
     ASSERT_TRUE(grid.shiftWindowTo({3.0, 0.0, 0.0}));
     ASSERT_TRUE(grid.isInside(tracked_position));
     EXPECT_EQ(grid.atPosition(tracked_position), 0);
+}
+
+
+using IndexTuple = std::tuple<int, int, int>;
+IndexTuple tupleOf(finenav_grid_map::GridIndex i) { return {i.x, i.y, i.z}; }
+
+TEST(GridDifference, MatchesBruteForceForAllDirectionsAndDegenerateAxes) {
+    using namespace finenav_grid_map;
+    for (GridIndex size : {GridIndex{1, 1, 1}, GridIndex{1, 3, 5}, GridIndex{5, 3, 7}}) {
+        GridIndexRegion all{{-size.x / 2, -size.y / 2, -size.z / 2},
+                            {size.x / 2, size.y / 2, size.z / 2}};
+        for (int dx = -size.x - 1; dx <= size.x + 1; ++dx)
+        for (int dy = -size.y - 1; dy <= size.y + 1; ++dy)
+        for (int dz = -size.z - 1; dz <= size.z + 1; ++dz) {
+            const GridIndex shift{dx, dy, dz};
+            std::set<IndexTuple> expected, actual;
+            all.forEachIndex([&](GridIndex i) {
+                auto j = i - shift;
+                if (std::abs(j.x) > size.x / 2 || std::abs(j.y) > size.y / 2 ||
+                    std::abs(j.z) > size.z / 2) expected.insert(tupleOf(i));
+            });
+            for (const auto& box : differenceRegions(size, shift)) {
+                box.forEachIndex([&](GridIndex i) {
+                    ASSERT_TRUE(actual.insert(tupleOf(i)).second) << "duplicate edge/corner";
+                });
+            }
+            ASSERT_EQ(actual, expected) << dx << ',' << dy << ',' << dz;
+        }
+    }
+}
+
+TEST(GridDifference, ExtremeIntegerShiftsReturnWholeBoxWithoutOverflow) {
+    using namespace finenav_grid_map;
+    for (int displacement : {std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {
+        size_t count = 0;
+        for (const auto& box : differenceRegions({3, 5, 7}, {0, displacement, 0}))
+            box.forEachIndex([&](GridIndex) { ++count; });
+        EXPECT_EQ(count, 105u);
+    }
+}
+
+TEST(GridMap, RandomWalkMatchesWorldCellOracleAndKeepsOverlapAddresses) {
+    using namespace finenav_grid_map;
+    GridMap<int> grid;
+    auto config = validConfig();
+    config.length = {5, 3, 7};
+    grid.configure(config);
+    const GridIndexRegion all{grid.getMinIndex(), grid.getMaxIndex()};
+    std::mt19937 random(12597);
+    std::uniform_int_distribution<int> step(-8, 8);
+    int next_value = 1;
+    for (int iteration = 0; iteration < 150; ++iteration) {
+        std::map<IndexTuple, std::pair<int, const int*>> old;
+        all.forEachIndex([&](GridIndex i) {
+            grid.at(i) = next_value++;
+            auto p = grid.getPosition(i);
+            old[{int(p.x), int(p.y), int(p.z)}] = {grid.at(i), &grid.at(i)};
+        });
+        auto center = grid.getWindowCenter();
+        const GridIndex shift{step(random), step(random), step(random)};
+        std::set<IndexTuple> removed;
+        GridDifferenceRegions incoming;
+        const bool moved = grid.shiftWindowToWithCallback(
+            {center.x + shift.x, center.y + shift.y, center.z + shift.z},
+            [&](GridIndex i, const int& value) {
+                ASSERT_EQ(value, grid.at(i));
+                ASSERT_TRUE(removed.insert(tupleOf(i)).second);
+            }, &incoming);
+        ASSERT_EQ(moved, shift != GridIndex{});
+        size_t entered = 0;
+        all.forEachIndex([&](GridIndex i) {
+            auto p = grid.getPosition(i);
+            auto found = old.find({int(p.x), int(p.y), int(p.z)});
+            if (found == old.end()) { EXPECT_EQ(grid.at(i), 0); ++entered; }
+            else {
+                EXPECT_EQ(grid.at(i), found->second.first);
+                EXPECT_EQ(&grid.at(i), found->second.second);
+            }
+            auto after = i - shift;
+            EXPECT_EQ(removed.count(tupleOf(i)), grid.isInside(after) ? 0u : 1u);
+        });
+        std::set<IndexTuple> new_indices;
+        for (const auto& box : incoming) box.forEachIndex([&](GridIndex i) {
+            EXPECT_TRUE(new_indices.insert(tupleOf(i)).second);
+            auto p = grid.getPosition(i);
+            EXPECT_EQ(old.count({int(p.x), int(p.y), int(p.z)}), 0u);
+        });
+        EXPECT_EQ(new_indices.size(), entered);
+        EXPECT_EQ(removed.size(), entered);
+    }
+}
+
+TEST(GridMap, HugeFiniteShiftStaysAlignedAndClearsOnce) {
+    using namespace finenav_grid_map;
+    GridMap<int> grid;
+    auto config = validConfig();
+    config.origin = {0.25, 0.25, 0.25};
+    config.length = {1, 1, 1};
+    config.resolution = 0.5;
+    grid.configure(config);
+    grid.at({0, 0, 0}) = 9;
+    std::vector<GridIndex> removed;
+    ASSERT_TRUE(grid.shiftWindowTo({double(std::numeric_limits<int>::max()) + 100.4, 0.25, 0.25}, &removed));
+    EXPECT_EQ(removed.size(), 27u);
+    EXPECT_EQ(grid.at({0, 0, 0}), 0);
+    EXPECT_DOUBLE_EQ(std::remainder(grid.getWindowCenter().x - 0.25, 0.5), 0.0);
+    removed.push_back({9, 9, 9});
+    EXPECT_FALSE(grid.shiftWindowTo(grid.getWindowCenter(), &removed));
+    EXPECT_TRUE(removed.empty());
+}
+
+
+TEST(GridMap, HalfCellRequestsRoundAwayFromZeroAndDoNotAccumulateSubCellDrift) {
+    finenav_grid_map::GridMap<int> grid;
+    grid.configure(validConfig());
+    size_t callbacks = 0;
+    EXPECT_FALSE(grid.shiftWindowToWithCallback({0.49,-0.49,0},
+        [&](const auto&,int){++callbacks;}));
+    EXPECT_EQ(callbacks,0u);
+    ASSERT_TRUE(grid.shiftWindowTo({0.5,-0.5,1.5}));
+    expectCenter(grid,1,-1,2);
+    EXPECT_FALSE(grid.shiftWindowTo({1.49,-1.49,2.49}));
+    expectCenter(grid,1,-1,2);
+}
+
+TEST(GridMap, UnrepresentableDisplacementDoesNotClearOrMoveWindow) {
+    finenav_grid_map::GridMap<int> grid;
+    auto config=validConfig();
+    config.origin.x=-std::numeric_limits<double>::max();
+    grid.configure(config);
+    grid.at({0,0,0})=17;
+    size_t callbacks=0;
+    finenav_grid_map::GridDifferenceRegions incoming;
+    EXPECT_FALSE(grid.shiftWindowToWithCallback({std::numeric_limits<double>::max(),0,0},
+        [&](const auto&,int){++callbacks;}, &incoming));
+    EXPECT_EQ(callbacks,0u);
+    EXPECT_EQ(incoming.count,0u);
+    EXPECT_EQ(grid.at({0,0,0}),17);
+    EXPECT_DOUBLE_EQ(grid.getWindowCenter().x,config.origin.x);
 }
 
 }  // namespace
